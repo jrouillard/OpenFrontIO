@@ -1,13 +1,10 @@
-import { GameType, UnitInfo, UnitType } from "../game/Game";
+import { UnitInfo, UnitType } from "../game/Game";
 import { UserSettings } from "../game/UserSettings";
 import { GameConfig } from "../Schemas";
 import { GameEnv, ServerConfig } from "./Config";
 import { DefaultConfig, DefaultServerConfig } from "./DefaultConfig";
 
 export class DevServerConfig extends DefaultServerConfig {
-  r2Bucket(): string {
-    return "openfront-staging";
-  }
   adminToken(): string {
     return "WARNING_DEV_ADMIN_KEY_DO_NOT_USE_IN_PRODUCTION";
   }
@@ -22,6 +19,14 @@ export class DevServerConfig extends DefaultServerConfig {
 
   lobbyMaxPlayers(): number {
     return Math.random() < 0.5 ? 2 : 3;
+  }
+
+  samWarheadHittingChance(): number {
+    return 1;
+  }
+
+  samHittingChance(): number {
+    return 1;
   }
 
   discordRedirectURI(): string {
@@ -40,10 +45,10 @@ export class DevConfig extends DefaultConfig {
     super(sc, gc, us);
   }
 
-  numSpawnPhaseTurns(): number {
-    return this.gameConfig().gameType == GameType.Singleplayer ? 40 : 100;
-    // return 100
-  }
+  // numSpawnPhaseTurns(): number {
+  //   return this.gameConfig().gameType == GameType.Singleplayer ? 70 : 100;
+  //   // return 100
+  // }
 
   unitInfo(type: UnitType): UnitInfo {
     const info = super.unitInfo(type);

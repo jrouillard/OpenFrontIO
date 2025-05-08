@@ -1,50 +1,51 @@
 import { Config } from "../configuration/Config";
+import { consolex } from "../Consolex";
+import { AllPlayersStats, ClientID } from "../Schemas";
+import { simpleHash } from "../Util";
+import { AllianceImpl } from "./AllianceImpl";
+import { AllianceRequestImpl } from "./AllianceRequestImpl";
 import {
+  Alliance,
+  AllianceRequest,
   Cell,
+  ColoredTeams,
+  Duos,
+  EmojiMessage,
   Execution,
   Game,
+  GameMode,
+  GameUpdates,
+  MessageType,
+  Nation,
+  Player,
   PlayerID,
   PlayerInfo,
-  Player,
+  PlayerType,
+  Team,
+  TerrainType,
   TerraNullius,
   Unit,
-  AllianceRequest,
-  Alliance,
-  Nation,
-  UnitType,
   UnitInfo,
-  GameUpdates,
-  TerrainType,
-  EmojiMessage,
-  Team,
-  GameMode,
-  TeamName,
-  PlayerType,
+  UnitType,
 } from "./Game";
-import { GameUpdate } from "./GameUpdates";
-import { GameUpdateType } from "./GameUpdates";
-import { NationMap } from "./TerrainMapLoader";
+import { GameMap, TileRef, TileUpdate } from "./GameMap";
+import { GameUpdate, GameUpdateType } from "./GameUpdates";
 import { PlayerImpl } from "./PlayerImpl";
-import { TerraNulliusImpl } from "./TerraNulliusImpl";
-import { AllianceRequestImpl } from "./AllianceRequestImpl";
-import { AllianceImpl } from "./AllianceImpl";
-import { ClientID, AllPlayersStats } from "../Schemas";
-import { MessageType } from "./Game";
-import { UnitImpl } from "./UnitImpl";
-import { consolex } from "../Consolex";
-import { GameMap, GameMapImpl, TileRef, TileUpdate } from "./GameMap";
-import { UnitGrid } from "./UnitGrid";
-import { StatsImpl } from "./StatsImpl";
 import { Stats } from "./Stats";
-import { simpleHash } from "../Util";
+import { StatsImpl } from "./StatsImpl";
+import { assignTeams } from "./TeamAssignment";
+import { TerraNulliusImpl } from "./TerraNulliusImpl";
+import { UnitGrid } from "./UnitGrid";
+import { UnitImpl } from "./UnitImpl";
 
 export function createGame(
+  humans: PlayerInfo[],
+  nations: Nation[],
   gameMap: GameMap,
   miniGameMap: GameMap,
-  nationMap: NationMap,
   config: Config,
 ): Game {
-  return new GameImpl(gameMap, miniGameMap, nationMap, config);
+  return new GameImpl(humans, nations, gameMap, miniGameMap, config);
 }
 
 export type CellString = string;
@@ -53,8 +54,6 @@ export class GameImpl implements Game {
   private _ticks = 0;
 
   private unInitExecs: Execution[] = [];
-
-  private nations_: Nation[] = [];
 
   _players: Map<PlayerID, PlayerImpl> = new Map<PlayerID, PlayerImpl>();
   _playersBySmallID = [];
@@ -75,32 +74,70 @@ export class GameImpl implements Game {
 
   private _stats: StatsImpl = new StatsImpl();
 
-  private playerTeams: Team[] = [
-    { name: TeamName.Red },
-    { name: TeamName.Blue },
-  ];
-  private botTeam: Team = { name: TeamName.Bot };
+  private playerTeams: Team[] = [ColoredTeams.Red, ColoredTeams.Blue];
+  private botTeam: Team = ColoredTeams.Bot;
 
   constructor(
+    private _humans: PlayerInfo[],
+    private _nations: Nation[],
     private _map: GameMap,
     private miniGameMap: GameMap,
-    nationMap: NationMap,
     private _config: Config,
   ) {
     this._terraNullius = new TerraNulliusImpl();
     this._width = _map.width();
     this._height = _map.height();
-    this.nations_ = nationMap.nations.map(
-      (n) =>
-        new Nation(
-          n.flag || "",
-          n.name,
-          new Cell(n.coordinates[0], n.coordinates[1]),
-          n.strength,
-        ),
-    );
     this.unitGrid = new UnitGrid(this._map);
+
+    if (_config.gameConfig().gameMode === GameMode.Team) {
+      this.populateTeams();
+    }
+    this.addPlayers();
   }
+
+  private populateTeams() {
+    if (this._config.playerTeams() === Duos) {
+      this.playerTeams = [];
+      const numTeams = Math.ceil(
+        (this._humans.length + this._nations.length) / 2,
+      );
+      for (let i = 0; i < numTeams; i++) {
+        this.playerTeams.push("Team " + (i + 1));
+      }
+    } else {
+      const numPlayerTeams = this._config.playerTeams() as number;
+      if (numPlayerTeams < 2)
+        throw new Error(`Too few teams: ${numPlayerTeams}`);
+      if (numPlayerTeams >= 3) this.playerTeams.push(ColoredTeams.Yellow);
+      if (numPlayerTeams >= 4) this.playerTeams.push(ColoredTeams.Green);
+      if (numPlayerTeams >= 5) this.playerTeams.push(ColoredTeams.Purple);
+      if (numPlayerTeams >= 6) this.playerTeams.push(ColoredTeams.Orange);
+      if (numPlayerTeams >= 7) this.playerTeams.push(ColoredTeams.Teal);
+      if (numPlayerTeams >= 8)
+        throw new Error(`Too many teams: ${numPlayerTeams}`);
+    }
+  }
+
+  private addPlayers() {
+    if (this.config().gameConfig().gameMode != GameMode.Team) {
+      this._humans.forEach((p) => this.addPlayer(p));
+      this._nations.forEach((n) => this.addPlayer(n.playerInfo));
+      return;
+    }
+    const allPlayers = [
+      ...this._humans,
+      ...this._nations.map((n) => n.playerInfo),
+    ];
+    const playerToTeam = assignTeams(allPlayers, this.playerTeams);
+    for (const [playerInfo, team] of playerToTeam.entries()) {
+      if (team == "kicked") {
+        console.warn(`Player ${playerInfo.name} was kicked from team`);
+        continue;
+      }
+      this.addPlayer(playerInfo, team);
+    }
+  }
+
   isOnEdgeOfMap(ref: TileRef): boolean {
     return this._map.isOnEdgeOfMap(ref);
   }
@@ -122,7 +159,7 @@ export class GameImpl implements Game {
   }
 
   addUpdate(update: GameUpdate) {
-    (this.updates[update.type] as any[]).push(update);
+    (this.updates[update.type] as GameUpdate[]).push(update);
   }
 
   nextUnitID(): number {
@@ -152,7 +189,7 @@ export class GameImpl implements Game {
     return this.config().unitInfo(type);
   }
   nations(): Nation[] {
-    return this.nations_;
+    return this._nations;
   }
 
   createAllianceRequest(requestor: Player, recipient: Player): AllianceRequest {
@@ -327,13 +364,13 @@ export class GameImpl implements Game {
     return this.player(id);
   }
 
-  addPlayer(playerInfo: PlayerInfo, manpower: number): Player {
+  addPlayer(playerInfo: PlayerInfo, team: Team = null): Player {
     const player = new PlayerImpl(
       this,
       this.nextPlayerID,
       playerInfo,
-      manpower,
-      this.maybeAssignTeam(playerInfo),
+      this.config().startManpower(playerInfo),
+      team ?? this.maybeAssignTeam(playerInfo),
     );
     this._playersBySmallID.push(player);
     this.nextPlayerID++;
@@ -360,7 +397,7 @@ export class GameImpl implements Game {
   }
 
   playerByClientID(id: ClientID): Player | null {
-    for (const [pID, player] of this._players) {
+    for (const [, player] of this._players) {
       if (player.clientID() == id) {
         return player;
       }
@@ -492,7 +529,7 @@ export class GameImpl implements Game {
       );
     }
     if (!other.isTraitor()) {
-      (breaker as PlayerImpl).isTraitor_ = true;
+      breaker.markTraitor();
     }
 
     const breakerSet = new Set(breaker.alliances());
@@ -536,7 +573,7 @@ export class GameImpl implements Game {
     });
   }
 
-  setWinner(winner: Player | TeamName, allPlayersStats: AllPlayersStats): void {
+  setWinner(winner: Player | Team, allPlayersStats: AllPlayersStats): void {
     this.addUpdate({
       type: GameUpdateType.Win,
       winner: typeof winner === "string" ? winner : winner.smallID(),
@@ -665,8 +702,8 @@ export class GameImpl implements Game {
   manhattanDist(c1: TileRef, c2: TileRef): number {
     return this._map.manhattanDist(c1, c2);
   }
-  euclideanDist(c1: TileRef, c2: TileRef): number {
-    return this._map.euclideanDist(c1, c2);
+  euclideanDistSquared(c1: TileRef, c2: TileRef): number {
+    return this._map.euclideanDistSquared(c1, c2);
   }
   bfs(
     tile: TileRef,

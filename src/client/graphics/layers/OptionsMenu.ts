@@ -1,13 +1,13 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { EventBus } from "../../../core/EventBus";
-import { PauseGameEvent } from "../../Transport";
 import { GameType } from "../../../core/game/Game";
-import { GameView } from "../../../core/game/GameView";
-import { Layer } from "./Layer";
 import { GameUpdateType } from "../../../core/game/GameUpdates";
+import { GameView } from "../../../core/game/GameView";
 import { UserSettings } from "../../../core/game/UserSettings";
 import { AlternateViewEvent, RefreshGraphicsEvent } from "../../InputHandler";
+import { PauseGameEvent } from "../../Transport";
+import { Layer } from "./Layer";
 
 const button = ({
   classes = "",
@@ -106,6 +106,15 @@ export class OptionsMenu extends LitElement implements Layer {
     this.eventBus.emit(new RefreshGraphicsEvent());
   }
 
+  private onToggleRandomNameModeButtonClick() {
+    this.userSettings.toggleRandomName();
+  }
+
+  private onToggleFocusLockedButtonClick() {
+    this.userSettings.toggleFocusLocked();
+    this.requestUpdate();
+  }
+
   private onToggleLeftClickOpensMenu() {
     this.userSettings.toggleLeftClickOpenMenu();
   }
@@ -192,6 +201,12 @@ export class OptionsMenu extends LitElement implements Layer {
             children: "🌙: " + (this.userSettings.darkMode() ? "On" : "Off"),
           })}
           ${button({
+            onClick: this.onToggleRandomNameModeButtonClick,
+            title: "Random name mode",
+            children:
+              "🥷: " + (this.userSettings.anonymousNames() ? "On" : "Off"),
+          })}
+          ${button({
             onClick: this.onToggleLeftClickOpensMenu,
             title: "Left click",
             children:
@@ -200,6 +215,15 @@ export class OptionsMenu extends LitElement implements Layer {
                 ? "Opens menu"
                 : "Attack"),
           })}
+          <!-- ${button({
+            onClick: this.onToggleFocusLockedButtonClick,
+            title: "Lock Focus",
+            children:
+              "🗺: " +
+              (this.userSettings.focusLocked()
+                ? "Focus locked"
+                : "Hover focus"),
+          })} -->
         </div>
       </div>
     `;

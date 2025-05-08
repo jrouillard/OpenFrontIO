@@ -1,20 +1,17 @@
-import { nextTick } from "process";
+import { consolex } from "../Consolex";
 import {
-  Cell,
   Execution,
   Game,
+  MessageType,
   Player,
   PlayerID,
+  TerraNullius,
   Unit,
   UnitType,
-  TerraNullius,
-  MessageType,
 } from "../game/Game";
-import { PathFinder } from "../pathfinding/PathFinding";
-import { PathFindResultType } from "../pathfinding/AStar";
-import { PseudoRandom } from "../PseudoRandom";
-import { consolex } from "../Consolex";
 import { TileRef } from "../game/GameMap";
+import { AirPathFinder } from "../pathfinding/PathFinding";
+import { PseudoRandom } from "../PseudoRandom";
 import { simpleHash } from "../Util";
 import { NukeExecution } from "./NukeExecution";
 
@@ -32,7 +29,7 @@ export class MirvExecution implements Execution {
 
   private random: PseudoRandom;
 
-  private pathFinder: PathFinder;
+  private pathFinder: AirPathFinder;
 
   private targetPlayer: Player | TerraNullius;
 
@@ -52,7 +49,7 @@ export class MirvExecution implements Execution {
 
     this.random = new PseudoRandom(mg.ticks() + simpleHash(this.senderID));
     this.mg = mg;
-    this.pathFinder = PathFinder.Mini(mg, 10_000, true);
+    this.pathFinder = new AirPathFinder(mg, this.random);
     this.player = mg.player(this.senderID);
     this.targetPlayer = this.mg.owner(this.dst);
 
@@ -92,23 +89,12 @@ export class MirvExecution implements Execution {
         this.nuke.tile(),
         this.separateDst,
       );
-      switch (result.type) {
-        case PathFindResultType.Completed:
-          this.nuke.move(result.tile);
-          this.separate();
-          this.active = false;
-          return;
-        case PathFindResultType.NextTile:
-          this.nuke.move(result.tile);
-          break;
-        case PathFindResultType.Pending:
-          break;
-        case PathFindResultType.PathNotFound:
-          consolex.warn(
-            `nuke cannot find path from ${this.nuke.tile()} to ${this.dst}`,
-          );
-          this.active = false;
-          return;
+      if (result === true) {
+        this.separate();
+        this.active = false;
+        return;
+      } else {
+        this.nuke.move(result);
       }
     }
   }
@@ -158,6 +144,7 @@ export class MirvExecution implements Execution {
 
   randomLand(ref: TileRef, taken: TileRef[]): TileRef | null {
     let tries = 0;
+    const mirvRange2 = this.mirvRange * this.mirvRange;
     while (tries < 100) {
       tries++;
       const x = this.random.nextInt(
@@ -171,12 +158,11 @@ export class MirvExecution implements Execution {
       if (!this.mg.isValidCoord(x, y)) {
         continue;
       }
-      console.log(`got coord ${x}, ${y}`);
       const tile = this.mg.ref(x, y);
       if (!this.mg.isLand(tile)) {
         continue;
       }
-      if (this.mg.euclideanDist(tile, ref) > this.mirvRange) {
+      if (this.mg.euclideanDistSquared(tile, ref) > mirvRange2) {
         continue;
       }
       if (this.mg.owner(tile) != this.targetPlayer) {

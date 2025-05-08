@@ -1,12 +1,17 @@
-import { MessageType, UnitSpecificInfos } from "./Game";
-import { UnitUpdate } from "./GameUpdates";
-import { GameUpdateType } from "./GameUpdates";
-import { simpleHash, toInt, within, withinInt } from "../Util";
-import { Unit, TerraNullius, UnitType, Player, UnitInfo } from "./Game";
+import { simpleHash, toInt, withinInt } from "../Util";
+import {
+  MessageType,
+  Player,
+  Tick,
+  Unit,
+  UnitInfo,
+  UnitSpecificInfos,
+  UnitType,
+} from "./Game";
 import { GameImpl } from "./GameImpl";
-import { PlayerImpl } from "./PlayerImpl";
 import { TileRef } from "./GameMap";
-import { consolex } from "../Consolex";
+import { GameUpdateType, UnitUpdate } from "./GameUpdates";
+import { PlayerImpl } from "./PlayerImpl";
 
 export class UnitImpl implements Unit {
   private _active = true;
@@ -17,13 +22,15 @@ export class UnitImpl implements Unit {
   private _target: Unit = null;
   private _moveTarget: TileRef = null;
   private _targetedBySAM = false;
-
+  private _safeFromPiratesCooldown: number; // Only for trade ships
+  private _lastSetSafeFromPirates: number; // Only for trade ships
   private _constructionType: UnitType = undefined;
 
-  private _isSamCooldown: boolean = false;
+  private _cooldownTick: Tick | null = null;
   private _dstPort: Unit | null = null; // Only for trade ships
   private _detonationDst: TileRef | null = null; // Only for nukes
   private _warshipTarget: Unit | null = null;
+  private _cooldownDuration: number | null = null;
 
   constructor(
     private _type: UnitType,
@@ -39,6 +46,11 @@ export class UnitImpl implements Unit {
     this._dstPort = unitsSpecificInfos.dstPort;
     this._detonationDst = unitsSpecificInfos.detonationDst;
     this._warshipTarget = unitsSpecificInfos.warshipTarget;
+    this._cooldownDuration = unitsSpecificInfos.cooldownDuration;
+    this._lastSetSafeFromPirates = unitsSpecificInfos.lastSetSafeFromPirates;
+    this._safeFromPiratesCooldown = this.mg
+      .config()
+      .safeFromPiratesCooldownMax();
   }
 
   id() {
@@ -63,7 +75,7 @@ export class UnitImpl implements Unit {
       dstPortId: dstPort ? dstPort.id() : null,
       warshipTargetId: warshipTarget ? warshipTarget.id() : null,
       detonationDst: this.detonationDst(),
-      isSamCooldown: this.isSamCooldown() ? this.isSamCooldown() : null,
+      ticksLeftInCooldown: this.ticksLeftInCooldown(this._cooldownDuration),
     };
   }
 
@@ -79,8 +91,10 @@ export class UnitImpl implements Unit {
     if (tile == null) {
       throw new Error("tile cannot be null");
     }
+    this.mg.removeUnit(this);
     this._lastTile = this._tile;
     this._tile = tile;
+    this.mg.addUnit(this);
     this.mg.addUpdate(this.toUpdate());
   }
   setTroops(troops: number): void {
@@ -134,7 +148,7 @@ export class UnitImpl implements Unit {
     this._active = false;
     this.mg.addUpdate(this.toUpdate());
     this.mg.removeUnit(this);
-    if (displayMessage) {
+    if (displayMessage && this.type() != UnitType.MIRVWarhead) {
       this.mg.displayMessage(
         `Your ${this.type()} was destroyed`,
         MessageType.ERROR,
@@ -193,13 +207,26 @@ export class UnitImpl implements Unit {
     return this._dstPort;
   }
 
-  setSamCooldown(cooldown: boolean): void {
-    this._isSamCooldown = cooldown;
-    this.mg.addUpdate(this.toUpdate());
+  // set the cooldown to the current tick or remove it
+  setCooldown(triggerCooldown: boolean): void {
+    if (triggerCooldown) {
+      this._cooldownTick = this.mg.ticks();
+      this.mg.addUpdate(this.toUpdate());
+    } else {
+      this._cooldownTick = null;
+      this.mg.addUpdate(this.toUpdate());
+    }
   }
 
-  isSamCooldown(): boolean {
-    return this._isSamCooldown;
+  ticksLeftInCooldown(cooldownDuration: number): Tick {
+    return Math.max(
+      0,
+      cooldownDuration - (this.mg.ticks() - this._cooldownTick),
+    );
+  }
+
+  isCooldown(): boolean {
+    return this._cooldownTick ? true : false;
   }
 
   setDstPort(dstPort: Unit): void {
@@ -220,5 +247,16 @@ export class UnitImpl implements Unit {
 
   targetedBySAM(): boolean {
     return this._targetedBySAM;
+  }
+
+  setSafeFromPirates(): void {
+    this._lastSetSafeFromPirates = this.mg.ticks();
+  }
+
+  isSafeFromPirates(): boolean {
+    return (
+      this.mg.ticks() - this._lastSetSafeFromPirates <
+      this._safeFromPiratesCooldown
+    );
   }
 }

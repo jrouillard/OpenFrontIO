@@ -1,11 +1,10 @@
 import { consolex } from "../Consolex";
 import {
-  Cell,
   Execution,
   Game,
   Player,
-  Unit,
   PlayerID,
+  Unit,
   UnitType,
 } from "../game/Game";
 import { TileRef } from "../game/GameMap";
@@ -34,18 +33,28 @@ export class MissileSiloExecution implements Execution {
 
   tick(ticks: number): void {
     if (this.silo == null) {
-      if (!this.player.canBuild(UnitType.MissileSilo, this.tile)) {
+      const spawn = this.player.canBuild(UnitType.MissileSilo, this.tile);
+      if (spawn === false) {
         consolex.warn(
           `player ${this.player} cannot build missile silo at ${this.tile}`,
         );
         this.active = false;
         return;
       }
-      this.silo = this.player.buildUnit(UnitType.MissileSilo, 0, this.tile);
+      this.silo = this.player.buildUnit(UnitType.MissileSilo, 0, spawn, {
+        cooldownDuration: this.mg.config().SiloCooldown(),
+      });
 
       if (this.player != this.silo.owner()) {
         this.player = this.silo.owner();
       }
+    }
+
+    if (
+      this.silo.isCooldown() &&
+      this.silo.ticksLeftInCooldown(this.mg.config().SiloCooldown()) == 0
+    ) {
+      this.silo.setCooldown(false);
     }
   }
 

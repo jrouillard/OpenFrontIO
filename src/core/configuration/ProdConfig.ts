@@ -1,10 +1,7 @@
 import { GameEnv } from "./Config";
-import { DefaultConfig, DefaultServerConfig } from "./DefaultConfig";
+import { DefaultServerConfig } from "./DefaultConfig";
 
 export const prodConfig = new (class extends DefaultServerConfig {
-  r2Bucket(): string {
-    return "openfront-prod";
-  }
   numWorkers(): number {
     return 6;
   }

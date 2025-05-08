@@ -1,19 +1,18 @@
 import { PriorityQueue } from "@datastructures-js/priority-queue";
+import { renderNumber, renderTroops } from "../../client/Utils";
 import {
   Attack,
-  Cell,
   Execution,
   Game,
+  MessageType,
   Player,
   PlayerID,
   PlayerType,
   TerrainType,
   TerraNullius,
 } from "../game/Game";
-import { PseudoRandom } from "../PseudoRandom";
-import { MessageType } from "../game/Game";
-import { renderNumber, renderTroops } from "../../client/Utils";
 import { TileRef } from "../game/GameMap";
+import { PseudoRandom } from "../PseudoRandom";
 
 const malusForRetreat = 25;
 
@@ -22,13 +21,6 @@ export class AttackExecution implements Execution {
   private active: boolean = true;
   private toConquer: PriorityQueue<TileContainer> =
     new PriorityQueue<TileContainer>((a: TileContainer, b: TileContainer) => {
-      if (a.priority == b.priority) {
-        if (a.tick == b.tick) {
-          return 0;
-          // return this.random.nextInt(-1, 1)
-        }
-        return a.tick - b.tick;
-      }
       return a.priority - b.priority;
     });
   private random = new PseudoRandom(123);
@@ -191,7 +183,11 @@ export class AttackExecution implements Execution {
 
   tick(ticks: number) {
     if (this.attack.retreated()) {
-      this.retreat(malusForRetreat);
+      if (this.attack.target().isPlayer()) {
+        this.retreat(malusForRetreat);
+      } else {
+        this.retreat();
+      }
       this.active = false;
       return;
     }
@@ -224,8 +220,6 @@ export class AttackExecution implements Execution {
         this.target,
         this.border.size + this.random.nextInt(0, 5),
       );
-    // consolex.log(`num tiles per tick: ${numTilesPerTick}`)
-    // consolex.log(`num execs: ${this.mg.executions().length}`)
 
     while (numTilesPerTick > 0) {
       if (this.attack.troops() < 1) {
@@ -276,13 +270,9 @@ export class AttackExecution implements Execution {
         continue;
       }
       this.border.add(neighbor);
-      let numOwnedByMe = this.mg
+      const numOwnedByMe = this.mg
         .neighbors(neighbor)
         .filter((t) => this.mg.owner(t) == this._owner).length;
-      const dist = 0;
-      if (numOwnedByMe > 2) {
-        numOwnedByMe = 10;
-      }
       let mag = 0;
       switch (this.mg.terrainType(tile)) {
         case TerrainType.Plains:
@@ -298,8 +288,9 @@ export class AttackExecution implements Execution {
       this.toConquer.enqueue(
         new TileContainer(
           neighbor,
-          dist / 100 + this.random.nextInt(0, 2) - numOwnedByMe + mag,
-          this.mg.ticks(),
+          (this.random.nextInt(0, 7) + 10) *
+            (1 - numOwnedByMe * 0.5 + mag / 2) +
+            this.mg.ticks(),
         ),
       );
     }
@@ -352,6 +343,5 @@ class TileContainer {
   constructor(
     public readonly tile: TileRef,
     public readonly priority: number,
-    public readonly tick: number,
   ) {}
 }

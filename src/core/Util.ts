@@ -1,19 +1,22 @@
-import { v4 as uuidv4 } from "uuid";
-import twemoji from "twemoji";
 import DOMPurify from "dompurify";
-import { Cell, Game, Player, TeamName, Unit } from "./game/Game";
+import { customAlphabet } from "nanoid";
+import twemoji from "twemoji";
+import { Cell, Team, Unit } from "./game/Game";
+import { GameMap, TileRef } from "./game/GameMap";
 import {
   AllPlayersStats,
   ClientID,
-  GameConfig,
   GameID,
   GameRecord,
+  GameStartInfo,
   PlayerRecord,
-  PlayerStats,
   Turn,
 } from "./Schemas";
-import { customAlphabet, nanoid } from "nanoid";
-import { andFN, GameMap, manhattanDistFN, TileRef } from "./game/GameMap";
+
+import {
+  BOT_NAME_PREFIXES,
+  BOT_NAME_SUFFIXES,
+} from "./execution/utils/BotNames";
 
 export function manhattanDistWrapped(
   c1: Cell,
@@ -57,72 +60,6 @@ export function distSortUnit(
       gm.manhattanDist(b.tile(), targetRef)
     );
   };
-}
-
-// TODO: refactor to new file
-export function sourceDstOceanShore(
-  gm: Game,
-  src: Player,
-  tile: TileRef,
-): [TileRef | null, TileRef | null] {
-  const dst = gm.owner(tile);
-  const srcTile = closestShoreFromPlayer(gm, src, tile);
-  let dstTile: TileRef | null = null;
-  if (dst.isPlayer()) {
-    dstTile = closestShoreFromPlayer(gm, dst as Player, tile);
-  } else {
-    dstTile = closestShoreTN(gm, tile, 50);
-  }
-  return [srcTile, dstTile];
-}
-
-export function targetTransportTile(gm: Game, tile: TileRef): TileRef | null {
-  const dst = gm.playerBySmallID(gm.ownerID(tile));
-  let dstTile: TileRef | null = null;
-  if (dst.isPlayer()) {
-    dstTile = closestShoreFromPlayer(gm, dst as Player, tile);
-  } else {
-    dstTile = closestShoreTN(gm, tile, 50);
-  }
-  return dstTile;
-}
-
-export function closestShoreFromPlayer(
-  gm: GameMap,
-  player: Player,
-  target: TileRef,
-): TileRef | null {
-  const shoreTiles = Array.from(player.borderTiles()).filter((t) =>
-    gm.isShore(t),
-  );
-  if (shoreTiles.length == 0) {
-    return null;
-  }
-
-  return shoreTiles.reduce((closest, current) => {
-    const closestDistance = gm.manhattanDist(target, closest);
-    const currentDistance = gm.manhattanDist(target, current);
-    return currentDistance < closestDistance ? current : closest;
-  });
-}
-
-function closestShoreTN(
-  gm: GameMap,
-  tile: TileRef,
-  searchDist: number,
-): TileRef {
-  const tn = Array.from(
-    gm.bfs(
-      tile,
-      andFN((_, t) => !gm.hasOwner(t), manhattanDistFN(tile, searchDist)),
-    ),
-  )
-    .filter((t) => gm.isShore(t))
-    .sort((a, b) => gm.manhattanDist(tile, a) - gm.manhattanDist(tile, b));
-  if (tn.length == 0) {
-    return null;
-  }
-  return tn[0];
 }
 
 export function simpleHash(str: string): number {
@@ -249,19 +186,19 @@ export function onlyImages(html: string) {
 
 export function createGameRecord(
   id: GameID,
-  gameConfig: GameConfig,
+  gameStart: GameStartInfo,
   // username does not need to be set.
   players: PlayerRecord[],
   turns: Turn[],
   start: number,
   end: number,
-  winner: ClientID | TeamName | null,
+  winner: ClientID | Team | null,
   winnerType: "player" | "team" | null,
   allPlayersStats: AllPlayersStats,
 ): GameRecord {
   const record: GameRecord = {
     id: id,
-    gameConfig: gameConfig,
+    gameStartInfo: gameStart,
     startTimestampMS: start,
     endTimestampMS: end,
     date: new Date().toISOString().split("T")[0],
@@ -354,3 +291,35 @@ export function withinInt(num: bigint, min: bigint, max: bigint): bigint {
   const atLeastMin = maxInt(num, min);
   return minInt(atLeastMin, max);
 }
+
+export function createRandomName(
+  name: string,
+  playerType: string,
+): string | null {
+  let randomName = null;
+  if (playerType === "HUMAN") {
+    const hash = simpleHash(name);
+    const prefixIndex = hash % BOT_NAME_PREFIXES.length;
+    const suffixIndex =
+      Math.floor(hash / BOT_NAME_PREFIXES.length) % BOT_NAME_SUFFIXES.length;
+
+    randomName = `👤 ${BOT_NAME_PREFIXES[prefixIndex]} ${BOT_NAME_SUFFIXES[suffixIndex]}`;
+  }
+  return randomName;
+}
+
+export const emojiTable: string[][] = [
+  ["😀", "😊", "🥰", "😇", "😎"],
+  ["😞", "🥺", "😭", "😱", "😡"],
+  ["😈", "🤡", "🖕", "🥱", "🤦‍♂️"],
+  ["👋", "👏", "🤌", "💪", "🫡"],
+  ["👍", "👎", "❓", "🐔", "🐀"],
+  ["🤝", "🆘", "🕊️", "🏳️", "⏳"],
+  ["🔥", "💥", "💀", "☢️", "⚠️"],
+  ["↖️", "⬆️", "↗️", "👑", "🥇"],
+  ["⬅️", "🎯", "➡️", "🥈", "🥉"],
+  ["↙️", "⬇️", "↘️", "❤️", "💔"],
+  ["💰", "⚓", "⛵", "🏡", "🛡️"],
+];
+// 2d to 1d array
+export const flattenedEmojiTable: string[] = [].concat(...emojiTable);

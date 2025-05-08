@@ -38,7 +38,7 @@ export interface GameMap {
   forEachTile(fn: (tile: TileRef) => void): void;
 
   manhattanDist(c1: TileRef, c2: TileRef): number;
-  euclideanDist(c1: TileRef, c2: TileRef): number;
+  euclideanDistSquared(c1: TileRef, c2: TileRef): number;
   bfs(
     tile: TileRef,
     filter: (gm: GameMap, tile: TileRef) => boolean,
@@ -57,6 +57,11 @@ export class GameMapImpl implements GameMap {
   private readonly state: Uint16Array; // Mutable game state
   private readonly width_: number;
   private readonly height_: number;
+
+  // Lookup tables (LUTs) contain pre-computed values to avoid performing division at runtime
+  private readonly refToX: number[];
+  private readonly refToY: number[];
+  private readonly yToRef: number[];
 
   // Terrain bits (Uint8Array)
   private static readonly IS_LAND_BIT = 7;
@@ -87,6 +92,19 @@ export class GameMapImpl implements GameMap {
     this.height_ = height;
     this.terrain = terrainData;
     this.state = new Uint16Array(width * height);
+    // Precompute the LUTs
+    let ref = 0;
+    this.refToX = new Array(width * height);
+    this.refToY = new Array(width * height);
+    this.yToRef = new Array(height);
+    for (let y = 0; y < height; y++) {
+      this.yToRef[y] = ref;
+      for (let x = 0; x < width; x++) {
+        this.refToX[ref] = x;
+        this.refToY[ref] = y;
+        ref++;
+      }
+    }
   }
   numTilesWithFallout(): number {
     return this._numTilesWithFallout;
@@ -96,15 +114,15 @@ export class GameMapImpl implements GameMap {
     if (!this.isValidCoord(x, y)) {
       throw new Error(`Invalid coordinates: ${x},${y}`);
     }
-    return y * this.width_ + x;
+    return this.yToRef[y] + x;
   }
 
   x(ref: TileRef): number {
-    return ref % this.width_;
+    return this.refToX[ref];
   }
 
   y(ref: TileRef): number {
-    return Math.floor(ref / this.width_);
+    return this.refToY[ref];
   }
 
   cell(ref: TileRef): Cell {
@@ -240,24 +258,19 @@ export class GameMapImpl implements GameMap {
   neighbors(ref: TileRef): TileRef[] {
     const neighbors: TileRef[] = [];
     const w = this.width_;
+    const x = this.refToX[ref];
 
     if (ref >= w) neighbors.push(ref - w);
     if (ref < (this.height_ - 1) * w) neighbors.push(ref + w);
-    if (ref % w !== 0) neighbors.push(ref - 1);
-    if (ref % w !== w - 1) neighbors.push(ref + 1);
-
-    for (const n of neighbors) {
-      this.ref(this.x(n), this.y(n));
-    }
+    if (x !== 0) neighbors.push(ref - 1);
+    if (x !== w - 1) neighbors.push(ref + 1);
 
     return neighbors;
   }
 
   forEachTile(fn: (tile: TileRef) => void): void {
-    for (let x = 0; x < this.width_; x++) {
-      for (let y = 0; y < this.height_; y++) {
-        fn(this.ref(x, y));
-      }
+    for (let ref: TileRef = 0; ref < this.width_ * this.height_; ref++) {
+      fn(ref);
     }
   }
 
@@ -266,11 +279,10 @@ export class GameMapImpl implements GameMap {
       Math.abs(this.x(c1) - this.x(c2)) + Math.abs(this.y(c1) - this.y(c2))
     );
   }
-  euclideanDist(c1: TileRef, c2: TileRef): number {
-    return Math.sqrt(
-      Math.pow(this.x(c1) - this.x(c2), 2) +
-        Math.pow(this.y(c1) - this.y(c2), 2),
-    );
+  euclideanDistSquared(c1: TileRef, c2: TileRef): number {
+    const x = this.x(c1) - this.x(c2);
+    const y = this.y(c1) - this.y(c2);
+    return x * x + y * y;
   }
   bfs(
     tile: TileRef,
@@ -278,7 +290,11 @@ export class GameMapImpl implements GameMap {
   ): Set<TileRef> {
     const seen = new Set<TileRef>();
     const q: TileRef[] = [];
-    q.push(tile);
+    if (filter(this, tile)) {
+      seen.add(tile);
+      q.push(tile);
+    }
+
     while (q.length > 0) {
       const curr = q.pop();
       for (const n of this.neighbors(curr)) {
@@ -322,8 +338,10 @@ export function euclDistFN(
   dist: number,
   center: boolean = false,
 ): (gm: GameMap, tile: TileRef) => boolean {
+  const dist2 = dist * dist;
   if (!center) {
-    return (gm: GameMap, n: TileRef) => gm.euclideanDist(root, n) <= dist;
+    return (gm: GameMap, n: TileRef) =>
+      gm.euclideanDistSquared(root, n) <= dist2;
   } else {
     return (gm: GameMap, n: TileRef) => {
       // shifts the root tile’s coordinates by -0.5 so that its “center”
@@ -333,7 +351,7 @@ export function euclDistFN(
       const rootY = gm.y(root) - 0.5;
       const dx = gm.x(n) - rootX;
       const dy = gm.y(n) - rootY;
-      return Math.sqrt(dx * dx + dy * dy) <= dist;
+      return dx * dx + dy * dy <= dist2;
     };
   }
 }

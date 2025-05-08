@@ -1,9 +1,9 @@
+import { Logger } from "winston";
 import { ServerConfig } from "../core/configuration/Config";
+import { Difficulty, GameMapType, GameMode, GameType } from "../core/game/Game";
 import { GameConfig, GameID } from "../core/Schemas";
 import { Client } from "./Client";
 import { GamePhase, GameServer } from "./GameServer";
-import { Difficulty, GameMapType, GameMode, GameType } from "../core/game/Game";
-import { Logger } from "winston";
 
 export class GameManager {
   private games: Map<GameID, GameServer> = new Map();
@@ -34,12 +34,12 @@ export class GameManager {
       gameType: GameType.Private,
       difficulty: Difficulty.Medium,
       disableNPCs: false,
-      disableNukes: false,
       infiniteGold: false,
       infiniteTroops: false,
       instantBuild: false,
       gameMode: GameMode.FFA,
       bots: 400,
+      disabledUnits: [],
       ...gameConfig,
     });
     this.games.set(id, game);
@@ -64,11 +64,16 @@ export class GameManager {
       const phase = game.phase();
       if (phase == GamePhase.Active) {
         if (!game.hasStarted()) {
-          try {
-            game.start();
-          } catch (error) {
-            this.log.error(`error starting game ${id}: ${error}`);
-          }
+          // Prestart tells clients to start loading the game.
+          game.prestart();
+          // Start game on delay to allow time for clients to connect.
+          setTimeout(() => {
+            try {
+              game.start();
+            } catch (error) {
+              this.log.error(`error starting game ${id}: ${error}`);
+            }
+          }, 2000);
         }
       }
 

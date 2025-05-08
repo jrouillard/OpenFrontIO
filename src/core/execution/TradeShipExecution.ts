@@ -1,20 +1,18 @@
-import { MessageType } from "../game/Game";
 import { renderNumber } from "../../client/Utils";
+import { consolex } from "../Consolex";
 import {
-  AllPlayers,
-  Cell,
   Execution,
   Game,
-  Unit,
+  MessageType,
   Player,
   PlayerID,
+  Unit,
   UnitType,
 } from "../game/Game";
-import { PathFinder } from "../pathfinding/PathFinding";
-import { PathFindResultType } from "../pathfinding/AStar";
-import { distSortUnit } from "../Util";
-import { consolex } from "../Consolex";
 import { TileRef } from "../game/GameMap";
+import { PathFindResultType } from "../pathfinding/AStar";
+import { PathFinder } from "../pathfinding/PathFinding";
+import { distSortUnit } from "../Util";
 
 export class TradeShipExecution implements Execution {
   private active = true;
@@ -49,6 +47,7 @@ export class TradeShipExecution implements Execution {
       }
       this.tradeShip = this.origOwner.buildUnit(UnitType.TradeShip, 0, spawn, {
         dstPort: this._dstPort,
+        lastSetSafeFromPirates: ticks,
       });
     }
 
@@ -58,11 +57,11 @@ export class TradeShipExecution implements Execution {
     }
 
     if (this.origOwner != this.tradeShip.owner()) {
-      // Store as vairable in case ship is recaptured by previous owner
+      // Store as variable in case ship is recaptured by previous owner
       this.wasCaptured = true;
     }
 
-    // If a player captures an other player's port while trading we should delete
+    // If a player captures another player's port while trading we should delete
     // the ship.
     if (this._dstPort.owner().id() == this.srcPort.owner().id()) {
       this.tradeShip.delete(false);
@@ -109,10 +108,17 @@ export class TradeShipExecution implements Execution {
         this.tradeShip.move(this.tradeShip.tile());
         break;
       case PathFindResultType.NextTile:
+        // Update safeFromPirates status
+        if (this.mg.isWater(result.tile) && this.mg.isShoreline(result.tile)) {
+          this.tradeShip.setSafeFromPirates();
+        }
         this.tradeShip.move(result.tile);
         break;
       case PathFindResultType.PathNotFound:
         consolex.warn("captured trade ship cannot find route");
+        if (this.tradeShip.isActive()) {
+          this.tradeShip.delete(false);
+        }
         this.active = false;
         break;
     }

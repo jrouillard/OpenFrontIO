@@ -1,7 +1,6 @@
 import { EventBus, GameEvent } from "../core/EventBus";
-import { UserSettings } from "../core/game/UserSettings";
-import { Game } from "../core/game/Game";
 import { UnitView } from "../core/game/GameView";
+import { UserSettings } from "../core/game/UserSettings";
 
 export class MouseUpEvent implements GameEvent {
   constructor(
@@ -70,6 +69,12 @@ export class ShowBuildMenuEvent implements GameEvent {
     public readonly y: number,
   ) {}
 }
+export class ShowEmojiMenuEvent implements GameEvent {
+  constructor(
+    public readonly x: number,
+    public readonly y: number,
+  ) {}
+}
 
 export class AttackRatioEvent implements GameEvent {
   constructor(public readonly attackRatio: number) {}
@@ -94,7 +99,7 @@ export class InputHandler {
 
   private alternateView = false;
 
-  private moveInterval: any = null;
+  private moveInterval: NodeJS.Timeout = null;
   private activeKeys = new Set<string>();
 
   private readonly PAN_SPEED = 5;
@@ -108,6 +113,17 @@ export class InputHandler {
   ) {}
 
   initialize() {
+    const keybinds = {
+      toggleView: "Space",
+      centerCamera: "KeyC",
+      moveUp: "KeyW",
+      moveDown: "KeyS",
+      moveLeft: "KeyA",
+      moveRight: "KeyD",
+      zoomOut: "KeyQ",
+      zoomIn: "KeyE",
+      ...JSON.parse(localStorage.getItem("settings.keybinds") ?? "{}"),
+    };
     this.canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     window.addEventListener("pointerup", (e) => this.onPointerUp(e));
     this.canvas.addEventListener(
@@ -117,59 +133,65 @@ export class InputHandler {
         this.onShiftScroll(e);
         e.preventDefault();
       },
-      {
-        passive: false,
-      },
+      { passive: false },
     );
     window.addEventListener("pointermove", this.onPointerMove.bind(this));
-    this.canvas.addEventListener("contextmenu", (e: MouseEvent) => {
-      this.onContextMenu(e);
-    });
+    this.canvas.addEventListener("contextmenu", (e) => this.onContextMenu(e));
     window.addEventListener("mousemove", (e) => {
-      if (e.movementX == 0 && e.movementY == 0) {
-        return;
+      if (e.movementX || e.movementY) {
+        this.eventBus.emit(new MouseMoveEvent(e.clientX, e.clientY));
       }
-      this.eventBus.emit(new MouseMoveEvent(e.clientX, e.clientY));
     });
     this.pointers.clear();
 
-    // Initialize the combined movement interval
     this.moveInterval = setInterval(() => {
       let deltaX = 0;
       let deltaY = 0;
 
-      // Handle both WASD and arrow keys
-      if (this.activeKeys.has("KeyW") || this.activeKeys.has("ArrowUp"))
+      if (
+        this.activeKeys.has(keybinds.moveUp) ||
+        this.activeKeys.has("ArrowUp")
+      )
         deltaY += this.PAN_SPEED;
-      if (this.activeKeys.has("KeyS") || this.activeKeys.has("ArrowDown"))
+      if (
+        this.activeKeys.has(keybinds.moveDown) ||
+        this.activeKeys.has("ArrowDown")
+      )
         deltaY -= this.PAN_SPEED;
-      if (this.activeKeys.has("KeyA") || this.activeKeys.has("ArrowLeft"))
+      if (
+        this.activeKeys.has(keybinds.moveLeft) ||
+        this.activeKeys.has("ArrowLeft")
+      )
         deltaX += this.PAN_SPEED;
-      if (this.activeKeys.has("KeyD") || this.activeKeys.has("ArrowRight"))
+      if (
+        this.activeKeys.has(keybinds.moveRight) ||
+        this.activeKeys.has("ArrowRight")
+      )
         deltaX -= this.PAN_SPEED;
 
-      if (deltaX !== 0 || deltaY !== 0) {
+      if (deltaX || deltaY) {
         this.eventBus.emit(new DragEvent(deltaX, deltaY));
       }
 
-      // Handle zooming
-      const screenCenterX = window.innerWidth / 2;
-      const screenCenterY = window.innerHeight / 2;
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
 
-      if (this.activeKeys.has("Minus") || this.activeKeys.has("KeyQ")) {
-        this.eventBus.emit(
-          new ZoomEvent(screenCenterX, screenCenterY, this.ZOOM_SPEED),
-        );
+      if (
+        this.activeKeys.has(keybinds.zoomOut) ||
+        this.activeKeys.has("Minus")
+      ) {
+        this.eventBus.emit(new ZoomEvent(cx, cy, this.ZOOM_SPEED));
       }
-      if (this.activeKeys.has("Equal") || this.activeKeys.has("KeyE")) {
-        this.eventBus.emit(
-          new ZoomEvent(screenCenterX, screenCenterY, -this.ZOOM_SPEED),
-        );
+      if (
+        this.activeKeys.has(keybinds.zoomIn) ||
+        this.activeKeys.has("Equal")
+      ) {
+        this.eventBus.emit(new ZoomEvent(cx, cy, -this.ZOOM_SPEED));
       }
     }, 1);
 
     window.addEventListener("keydown", (e) => {
-      if (e.code === "Space") {
+      if (e.code === keybinds.toggleView) {
         e.preventDefault();
         if (!this.alternateView) {
           this.alternateView = true;
@@ -182,24 +204,23 @@ export class InputHandler {
         this.eventBus.emit(new CloseViewEvent());
       }
 
-      // Add all movement keys to activeKeys
       if (
         [
-          "KeyW",
-          "KeyA",
-          "KeyS",
-          "KeyD",
+          keybinds.moveUp,
+          keybinds.moveDown,
+          keybinds.moveLeft,
+          keybinds.moveRight,
+          keybinds.zoomOut,
+          keybinds.zoomIn,
           "ArrowUp",
           "ArrowLeft",
           "ArrowDown",
           "ArrowRight",
           "Minus",
           "Equal",
-          "KeyE",
-          "KeyQ",
           "Digit1",
           "Digit2",
-          "KeyC",
+          keybinds.centerCamera,
           "ControlLeft",
           "ControlRight",
         ].includes(e.code)
@@ -207,13 +228,13 @@ export class InputHandler {
         this.activeKeys.add(e.code);
       }
     });
-
     window.addEventListener("keyup", (e) => {
-      if (e.code === "Space") {
+      if (e.code === keybinds.toggleView) {
         e.preventDefault();
         this.alternateView = false;
         this.eventBus.emit(new AlternateViewEvent(false));
       }
+
       if (e.key.toLowerCase() === "r" && e.altKey && !e.ctrlKey) {
         e.preventDefault();
         this.eventBus.emit(new RefreshGraphicsEvent());
@@ -229,35 +250,12 @@ export class InputHandler {
         this.eventBus.emit(new AttackRatioEvent(10));
       }
 
-      if (e.code === "KeyC") {
+      if (e.code === keybinds.centerCamera) {
         e.preventDefault();
         this.eventBus.emit(new CenterCameraEvent());
       }
 
-      // Remove all movement keys from activeKeys
-      if (
-        [
-          "KeyW",
-          "KeyA",
-          "KeyS",
-          "KeyD",
-          "ArrowUp",
-          "ArrowLeft",
-          "ArrowDown",
-          "ArrowRight",
-          "Minus",
-          "Equal",
-          "KeyE",
-          "KeyQ",
-          "Digit1",
-          "Digit2",
-          "KeyC",
-          "ControlLeft",
-          "ControlRight",
-        ].includes(e.code)
-      ) {
-        this.activeKeys.delete(e.code);
-      }
+      this.activeKeys.delete(e.code);
     });
   }
 
@@ -291,6 +289,10 @@ export class InputHandler {
 
     if (event.ctrlKey) {
       this.eventBus.emit(new ShowBuildMenuEvent(event.clientX, event.clientY));
+      return;
+    }
+    if (event.altKey) {
+      this.eventBus.emit(new ShowEmojiMenuEvent(event.clientX, event.clientY));
       return;
     }
 

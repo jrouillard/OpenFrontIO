@@ -1,36 +1,31 @@
-import { Config, ServerConfig } from "../core/configuration/Config";
 import { SendLogEvent } from "../core/Consolex";
 import { EventBus, GameEvent } from "../core/EventBus";
 import {
-  AllianceRequest,
   AllPlayers,
   Cell,
   GameType,
-  Player,
   PlayerID,
   PlayerType,
-  TeamName,
+  Team,
   Tick,
   UnitType,
 } from "../core/game/Game";
+import { PlayerView } from "../core/game/GameView";
 import {
+  AllPlayersStats,
   ClientID,
   ClientIntentMessageSchema,
   ClientJoinMessageSchema,
-  GameID,
+  ClientLogMessageSchema,
+  ClientMessageSchema,
+  ClientPingMessageSchema,
+  ClientSendWinnerSchema,
   Intent,
   ServerMessage,
   ServerMessageSchema,
-  ClientPingMessageSchema,
-  GameConfig,
-  ClientLogMessageSchema,
-  ClientSendWinnerSchema,
-  ClientMessageSchema,
-  AllPlayersStats,
 } from "../core/Schemas";
 import { LobbyConfig } from "./ClientGameRunner";
 import { LocalServer } from "./LocalServer";
-import { PlayerView } from "../core/game/GameView";
 
 export class PauseGameEvent implements GameEvent {
   constructor(public readonly paused: boolean) {}
@@ -73,8 +68,9 @@ export class SendAttackIntentEvent implements GameEvent {
 export class SendBoatAttackIntentEvent implements GameEvent {
   constructor(
     public readonly targetID: PlayerID,
-    public readonly cell: Cell,
+    public readonly dst: Cell,
     public readonly troops: number,
+    public readonly src: Cell | null = null,
   ) {}
 }
 
@@ -92,15 +88,32 @@ export class SendTargetPlayerIntentEvent implements GameEvent {
 export class SendEmojiIntentEvent implements GameEvent {
   constructor(
     public readonly recipient: PlayerView | typeof AllPlayers,
-    public readonly emoji: string,
+    public readonly emoji: number,
   ) {}
 }
 
-export class SendDonateIntentEvent implements GameEvent {
+export class SendDonateGoldIntentEvent implements GameEvent {
+  constructor(
+    public readonly sender: PlayerView,
+    public readonly recipient: PlayerView,
+    public readonly gold: number | null,
+  ) {}
+}
+
+export class SendDonateTroopsIntentEvent implements GameEvent {
   constructor(
     public readonly sender: PlayerView,
     public readonly recipient: PlayerView,
     public readonly troops: number | null,
+  ) {}
+}
+
+export class SendQuickChatEvent implements GameEvent {
+  constructor(
+    public readonly sender: PlayerView,
+    public readonly recipient: PlayerView,
+    public readonly quickChatKey: string,
+    public readonly variables: { [key: string]: string },
   ) {}
 }
 
@@ -132,7 +145,7 @@ export class SendSetTargetTroopRatioEvent implements GameEvent {
 
 export class SendWinnerEvent implements GameEvent {
   constructor(
-    public readonly winner: ClientID | TeamName,
+    public readonly winner: ClientID | Team,
     public readonly allPlayersStats: AllPlayersStats,
     public readonly winnerType: "player" | "team",
   ) {}
@@ -162,8 +175,7 @@ export class Transport {
   private onmessage: (msg: ServerMessage) => void;
 
   private pingInterval: number | null = null;
-  private isLocal: boolean;
-
+  public readonly isLocal: boolean;
   constructor(
     private lobbyConfig: LobbyConfig,
     private eventBus: EventBus,
@@ -172,7 +184,7 @@ export class Transport {
     // For multiplayer games, GameConfig is not known until game starts.
     this.isLocal =
       lobbyConfig.gameRecord != null ||
-      lobbyConfig.gameConfig?.gameType == GameType.Singleplayer;
+      lobbyConfig.gameStartInfo?.config.gameType == GameType.Singleplayer;
 
     this.eventBus.on(SendAllianceRequestIntentEvent, (e) =>
       this.onSendAllianceRequest(e),
@@ -194,7 +206,13 @@ export class Transport {
       this.onSendTargetPlayerIntent(e),
     );
     this.eventBus.on(SendEmojiIntentEvent, (e) => this.onSendEmojiIntent(e));
-    this.eventBus.on(SendDonateIntentEvent, (e) => this.onSendDonateIntent(e));
+    this.eventBus.on(SendDonateGoldIntentEvent, (e) =>
+      this.onSendDonateGoldIntent(e),
+    );
+    this.eventBus.on(SendDonateTroopsIntentEvent, (e) =>
+      this.onSendDonateTroopIntent(e),
+    );
+    this.eventBus.on(SendQuickChatEvent, (e) => this.onSendQuickChatIntent(e));
     this.eventBus.on(SendEmbargoIntentEvent, (e) =>
       this.onSendEmbargoIntent(e),
     );
@@ -270,7 +288,7 @@ export class Transport {
     onmessage: (message: ServerMessage) => void,
   ) {
     this.startPing();
-    this.maybeKillSocket();
+    this.killExistingSocket();
     const wsHost = window.location.host;
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const workerPath = this.lobbyConfig.serverConfig.workerPath(
@@ -307,9 +325,13 @@ export class Transport {
       );
       if (event.code != 1000) {
         console.log(`reconnecting`);
-        this.connect(onconnect, onmessage);
+        this.reconnect();
       }
     };
+  }
+
+  public reconnect() {
+    this.connect(this.onconnect, this.onmessage);
   }
 
   private onSendLogEvent(event: SendLogEvent) {
@@ -336,7 +358,8 @@ export class Transport {
           clientID: this.lobbyConfig.clientID,
           lastTurn: numTurns,
           persistentID: this.lobbyConfig.persistentID,
-          username: this.lobbyConfig.playerName(),
+          username: this.lobbyConfig.playerName,
+          flag: this.lobbyConfig.flag,
         }),
       ),
     );
@@ -365,7 +388,6 @@ export class Transport {
     this.sendIntent({
       type: "allianceRequest",
       clientID: this.lobbyConfig.clientID,
-      playerID: event.requestor.id(),
       recipient: event.recipient.id(),
     });
   }
@@ -375,7 +397,6 @@ export class Transport {
       type: "allianceRequestReply",
       clientID: this.lobbyConfig.clientID,
       requestor: event.requestor.id(),
-      playerID: event.recipient.id(),
       accept: event.accepted,
     });
   }
@@ -384,7 +405,6 @@ export class Transport {
     this.sendIntent({
       type: "breakAlliance",
       clientID: this.lobbyConfig.clientID,
-      playerID: event.requestor.id(),
       recipient: event.recipient.id(),
     });
   }
@@ -393,9 +413,8 @@ export class Transport {
     this.sendIntent({
       type: "spawn",
       clientID: this.lobbyConfig.clientID,
-      playerID: this.lobbyConfig.playerID,
-      flag: this.lobbyConfig.flag(),
-      name: this.lobbyConfig.playerName(),
+      flag: this.lobbyConfig.flag,
+      name: this.lobbyConfig.playerName,
       playerType: PlayerType.Human,
       x: event.cell.x,
       y: event.cell.y,
@@ -406,7 +425,6 @@ export class Transport {
     this.sendIntent({
       type: "attack",
       clientID: this.lobbyConfig.clientID,
-      playerID: this.lobbyConfig.playerID,
       targetID: event.targetID,
       troops: event.troops,
     });
@@ -416,11 +434,12 @@ export class Transport {
     this.sendIntent({
       type: "boat",
       clientID: this.lobbyConfig.clientID,
-      playerID: this.lobbyConfig.playerID,
       targetID: event.targetID,
       troops: event.troops,
-      x: event.cell.x,
-      y: event.cell.y,
+      dstX: event.dst.x,
+      dstY: event.dst.y,
+      srcX: event.src?.x,
+      srcY: event.src?.y,
     });
   }
 
@@ -428,7 +447,6 @@ export class Transport {
     this.sendIntent({
       type: "targetPlayer",
       clientID: this.lobbyConfig.clientID,
-      playerID: this.lobbyConfig.playerID,
       target: event.targetID,
     });
   }
@@ -437,20 +455,37 @@ export class Transport {
     this.sendIntent({
       type: "emoji",
       clientID: this.lobbyConfig.clientID,
-      playerID: this.lobbyConfig.playerID,
       recipient:
         event.recipient == AllPlayers ? AllPlayers : event.recipient.id(),
       emoji: event.emoji,
     });
   }
 
-  private onSendDonateIntent(event: SendDonateIntentEvent) {
+  private onSendDonateGoldIntent(event: SendDonateGoldIntentEvent) {
     this.sendIntent({
-      type: "donate",
+      type: "donate_gold",
       clientID: this.lobbyConfig.clientID,
-      playerID: event.sender.id(),
+      recipient: event.recipient.id(),
+      gold: event.gold,
+    });
+  }
+
+  private onSendDonateTroopIntent(event: SendDonateTroopsIntentEvent) {
+    this.sendIntent({
+      type: "donate_troops",
+      clientID: this.lobbyConfig.clientID,
       recipient: event.recipient.id(),
       troops: event.troops,
+    });
+  }
+
+  private onSendQuickChatIntent(event: SendQuickChatEvent) {
+    this.sendIntent({
+      type: "quick_chat",
+      clientID: this.lobbyConfig.clientID,
+      recipient: event.recipient.id(),
+      quickChatKey: event.quickChatKey,
+      variables: event.variables,
     });
   }
 
@@ -458,7 +493,6 @@ export class Transport {
     this.sendIntent({
       type: "embargo",
       clientID: this.lobbyConfig.clientID,
-      playerID: this.lobbyConfig.playerID,
       targetID: event.target.id(),
       action: event.action,
     });
@@ -468,7 +502,6 @@ export class Transport {
     this.sendIntent({
       type: "troop_ratio",
       clientID: this.lobbyConfig.clientID,
-      playerID: this.lobbyConfig.playerID,
       ratio: event.ratio,
     });
   }
@@ -477,7 +510,6 @@ export class Transport {
     this.sendIntent({
       type: "build_unit",
       clientID: this.lobbyConfig.clientID,
-      playerID: this.lobbyConfig.playerID,
       unit: event.unit,
       x: event.cell.x,
       y: event.cell.y,
@@ -541,7 +573,6 @@ export class Transport {
     this.sendIntent({
       type: "cancel_attack",
       clientID: this.lobbyConfig.clientID,
-      playerID: event.playerID,
       attackID: event.attackID,
     });
   }
@@ -559,7 +590,6 @@ export class Transport {
     this.sendIntent({
       type: "move_warship",
       clientID: this.lobbyConfig.clientID,
-      playerID: this.lobbyConfig.playerID,
       unitId: event.unitId,
       tile: event.tile,
     });
@@ -603,7 +633,7 @@ export class Transport {
     }
   }
 
-  private maybeKillSocket(): void {
+  private killExistingSocket(): void {
     if (this.socket == null) {
       return;
     }

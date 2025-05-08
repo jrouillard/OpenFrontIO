@@ -1,27 +1,21 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, css, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { EventBus } from "../../../core/EventBus";
-import {
-  Cell,
-  Game,
-  Player,
-  PlayerActions,
-  UnitType,
-} from "../../../core/game/Game";
-import { BuildUnitIntentEvent } from "../../Transport";
-import atomBombIcon from "../../../../resources/images/NukeIconWhite.svg";
-import hydrogenBombIcon from "../../../../resources/images/MushroomCloudIconWhite.svg";
 import warshipIcon from "../../../../resources/images/BattleshipIconWhite.svg";
-import missileSiloIcon from "../../../../resources/images/MissileSiloIconWhite.svg";
-import goldCoinIcon from "../../../../resources/images/GoldCoinIcon.svg";
-import portIcon from "../../../../resources/images/PortIcon.svg";
-import mirvIcon from "../../../../resources/images/MIRVIcon.svg";
 import cityIcon from "../../../../resources/images/CityIconWhite.svg";
+import goldCoinIcon from "../../../../resources/images/GoldCoinIcon.svg";
+import mirvIcon from "../../../../resources/images/MIRVIcon.svg";
+import missileSiloIcon from "../../../../resources/images/MissileSiloIconWhite.svg";
+import hydrogenBombIcon from "../../../../resources/images/MushroomCloudIconWhite.svg";
+import atomBombIcon from "../../../../resources/images/NukeIconWhite.svg";
+import portIcon from "../../../../resources/images/PortIcon.svg";
 import samlauncherIcon from "../../../../resources/images/SamLauncherIconWhite.svg";
 import shieldIcon from "../../../../resources/images/ShieldIconWhite.svg";
-import { renderNumber } from "../../Utils";
-import { GameView, PlayerView } from "../../../core/game/GameView";
+import { EventBus } from "../../../core/EventBus";
+import { Cell, PlayerActions, UnitType } from "../../../core/game/Game";
 import { TileRef } from "../../../core/game/GameMap";
+import { GameView } from "../../../core/game/GameView";
+import { BuildUnitIntentEvent } from "../../Transport";
+import { renderNumber } from "../../Utils";
 import { Layer } from "./Layer";
 
 interface BuildItemDisplay {
@@ -307,7 +301,7 @@ export class BuildMenu extends LitElement implements Layer {
     if (!unit) {
       return false;
     }
-    return unit[0].canBuild;
+    return unit[0].canBuild !== false;
   }
 
   private cost(item: BuildItemDisplay): number {
@@ -415,21 +409,9 @@ export class BuildMenu extends LitElement implements Layer {
   }
 
   private getBuildableUnits(): BuildItemDisplay[][] {
-    if (this.game?.config()?.disableNukes()) {
-      return buildTable.map((row) =>
-        row.filter(
-          (item) =>
-            ![
-              UnitType.AtomBomb,
-              UnitType.MIRV,
-              UnitType.HydrogenBomb,
-              UnitType.MissileSilo,
-              UnitType.SAMLauncher,
-            ].includes(item.unitType),
-        ),
-      );
-    }
-    return buildTable;
+    return buildTable.map((row) =>
+      row.filter((item) => !this.game?.config()?.isUnitDisabled(item.unitType)),
+    );
   }
 
   get isVisible() {

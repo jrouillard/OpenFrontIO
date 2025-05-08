@@ -1,11 +1,13 @@
 import { createGameRunner, GameRunner } from "../GameRunner";
 import { GameUpdateViewData } from "../game/GameUpdates";
 import {
-  MainThreadMessage,
-  WorkerMessage,
   InitializedMessage,
+  MainThreadMessage,
   PlayerActionsResultMessage,
+  PlayerBorderTilesResultMessage,
   PlayerProfileResultMessage,
+  TransportShipSpawnResultMessage,
+  WorkerMessage,
 } from "./WorkerMessages";
 
 const ctx: Worker = self as any;
@@ -32,8 +34,7 @@ ctx.addEventListener("message", async (e: MessageEvent<MainThreadMessage>) => {
     case "init":
       try {
         gameRunner = createGameRunner(
-          message.gameID,
-          message.gameConfig,
+          message.gameStartInfo,
           message.clientID,
           gameUpdate,
         ).then((gr) => {
@@ -99,6 +100,44 @@ ctx.addEventListener("message", async (e: MessageEvent<MainThreadMessage>) => {
       } catch (error) {
         console.error("Failed to check borders:", error);
         throw error;
+      }
+      break;
+    case "player_border_tiles":
+      if (!gameRunner) {
+        throw new Error("Game runner not initialized");
+      }
+
+      try {
+        const borderTiles = (await gameRunner).playerBorderTiles(
+          message.playerID,
+        );
+        sendMessage({
+          type: "player_border_tiles_result",
+          id: message.id,
+          result: borderTiles,
+        } as PlayerBorderTilesResultMessage);
+      } catch (error) {
+        console.error("Failed to get border tiles:", error);
+        throw error;
+      }
+      break;
+    case "transport_ship_spawn":
+      if (!gameRunner) {
+        throw new Error("Game runner not initialized");
+      }
+
+      try {
+        const spawnTile = (await gameRunner).bestTransportShipSpawn(
+          message.playerID,
+          message.targetTile,
+        );
+        sendMessage({
+          type: "transport_ship_spawn_result",
+          id: message.id,
+          result: spawnTile,
+        } as TransportShipSpawnResultMessage);
+      } catch (error) {
+        console.error("Failed to spawn transport ship:", error);
       }
       break;
     default:

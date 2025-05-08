@@ -1,31 +1,33 @@
-import { Game, PlayerInfo } from "../../core/game/Game";
-import { NameLayer } from "./layers/NameLayer";
-import { TerrainLayer } from "./layers/TerrainLayer";
-import { TerritoryLayer } from "./layers/TerritoryLayer";
-import { ClientID } from "../../core/Schemas";
+import { consolex } from "../../core/Consolex";
 import { EventBus } from "../../core/EventBus";
+import { ClientID } from "../../core/Schemas";
+import { GameView } from "../../core/game/GameView";
+import { GameStartingModal } from "../GameStartingModal";
+import { RefreshGraphicsEvent as RedrawGraphicsEvent } from "../InputHandler";
 import { TransformHandler } from "./TransformHandler";
-import { Layer } from "./layers/Layer";
-import { EventsDisplay } from "./layers/EventsDisplay";
-import { RadialMenu } from "./layers/RadialMenu";
-import { EmojiTable } from "./layers/EmojiTable";
-import { Leaderboard } from "./layers/Leaderboard";
-import { ControlPanel } from "./layers/ControlPanel";
 import { UIState } from "./UIState";
 import { BuildMenu } from "./layers/BuildMenu";
-import { UnitLayer } from "./layers/UnitLayer";
-import { UILayer } from "./layers/UILayer";
-import { StructureLayer } from "./layers/StructureLayer";
-import { PlayerInfoOverlay } from "./layers/PlayerInfoOverlay";
-import { consolex } from "../../core/Consolex";
-import { RefreshGraphicsEvent as RedrawGraphicsEvent } from "../InputHandler";
-import { GameView } from "../../core/game/GameView";
-import { WinModal } from "./layers/WinModal";
-import { SpawnTimer } from "./layers/SpawnTimer";
+import { ChatDisplay } from "./layers/ChatDisplay";
+import { ChatModal } from "./layers/ChatModal";
+import { ControlPanel } from "./layers/ControlPanel";
+import { EmojiTable } from "./layers/EmojiTable";
+import { EventsDisplay } from "./layers/EventsDisplay";
+import { Layer } from "./layers/Layer";
+import { Leaderboard } from "./layers/Leaderboard";
+import { MultiTabModal } from "./layers/MultiTabModal";
+import { NameLayer } from "./layers/NameLayer";
 import { OptionsMenu } from "./layers/OptionsMenu";
-import { TopBar } from "./layers/TopBar";
+import { PlayerInfoOverlay } from "./layers/PlayerInfoOverlay";
 import { PlayerPanel } from "./layers/PlayerPanel";
-import { GameStartingModal } from "../gameStartingModal";
+import { RadialMenu } from "./layers/RadialMenu";
+import { SpawnTimer } from "./layers/SpawnTimer";
+import { StructureLayer } from "./layers/StructureLayer";
+import { TerrainLayer } from "./layers/TerrainLayer";
+import { TerritoryLayer } from "./layers/TerritoryLayer";
+import { TopBar } from "./layers/TopBar";
+import { UILayer } from "./layers/UILayer";
+import { UnitLayer } from "./layers/UnitLayer";
+import { WinModal } from "./layers/WinModal";
 
 export function createRenderer(
   canvas: HTMLCanvasElement,
@@ -41,7 +43,6 @@ export function createRenderer(
   const startingModal = document.querySelector(
     "game-starting-modal",
   ) as GameStartingModal;
-  startingModal instanceof GameStartingModal;
   startingModal.hide();
 
   // TODO maybe append this to dcoument instead of querying for them?
@@ -49,6 +50,11 @@ export function createRenderer(
   if (!emojiTable || !(emojiTable instanceof EmojiTable)) {
     consolex.error("EmojiTable element not found in the DOM");
   }
+  emojiTable.eventBus = eventBus;
+  emojiTable.transformHandler = transformHandler;
+  emojiTable.game = game;
+  emojiTable.initEventBus();
+
   const buildMenu = document.querySelector("build-menu") as BuildMenu;
   if (!buildMenu || !(buildMenu instanceof BuildMenu)) {
     consolex.error("BuildMenu element not found in the DOM");
@@ -82,6 +88,14 @@ export function createRenderer(
   eventsDisplay.eventBus = eventBus;
   eventsDisplay.game = game;
   eventsDisplay.clientID = clientID;
+
+  const chatDisplay = document.querySelector("chat-display") as ChatDisplay;
+  if (!(chatDisplay instanceof ChatDisplay)) {
+    consolex.error("chat display not found");
+  }
+  chatDisplay.eventBus = eventBus;
+  chatDisplay.game = game;
+  chatDisplay.clientID = clientID;
 
   const playerInfo = document.querySelector(
     "player-info-overlay",
@@ -122,14 +136,30 @@ export function createRenderer(
   playerPanel.eventBus = eventBus;
   playerPanel.emojiTable = emojiTable;
 
+  const chatModal = document.querySelector("chat-modal") as ChatModal;
+  if (!(chatModal instanceof ChatModal)) {
+    console.error("chat modal not found");
+  }
+  chatModal.g = game;
+  chatModal.eventBus = eventBus;
+
+  const multiTabModal = document.querySelector(
+    "multi-tab-modal",
+  ) as MultiTabModal;
+  if (!(multiTabModal instanceof MultiTabModal)) {
+    console.error("multi-tab modal not found");
+  }
+  multiTabModal.game = game;
+
   const layers: Layer[] = [
-    new TerrainLayer(game),
+    new TerrainLayer(game, transformHandler),
     new TerritoryLayer(game, eventBus),
     new StructureLayer(game, eventBus),
     new UnitLayer(game, eventBus, clientID, transformHandler),
     new UILayer(game, eventBus, clientID, transformHandler),
     new NameLayer(game, transformHandler, clientID),
     eventsDisplay,
+    chatDisplay,
     buildMenu,
     new RadialMenu(
       eventBus,
@@ -150,6 +180,7 @@ export function createRenderer(
     optionsMenu,
     topBar,
     playerPanel,
+    multiTabModal,
   ];
 
   return new GameRenderer(

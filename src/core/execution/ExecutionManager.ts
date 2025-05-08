@@ -1,43 +1,27 @@
-import {
-  Cell,
-  Execution,
-  Game,
-  Player,
-  PlayerInfo,
-  TerraNullius,
-  PlayerType,
-  Alliance,
-  UnitType,
-} from "../game/Game";
-import {
-  AttackIntent,
-  BoatAttackIntentSchema,
-  ClientID,
-  GameID,
-  Intent,
-  Turn,
-} from "../Schemas";
-import { AttackExecution } from "./AttackExecution";
-import { SpawnExecution } from "./SpawnExecution";
-import { BotSpawner } from "./BotSpawner";
-import { TransportShipExecution } from "./TransportShipExecution";
+import { Execution, Game } from "../game/Game";
 import { PseudoRandom } from "../PseudoRandom";
-import { FakeHumanExecution } from "./FakeHumanExecution";
-import { sanitize, simpleHash } from "../Util";
+import { ClientID, GameID, Intent, Turn } from "../Schemas";
+import { simpleHash } from "../Util";
 import { AllianceRequestExecution } from "./alliance/AllianceRequestExecution";
 import { AllianceRequestReplyExecution } from "./alliance/AllianceRequestReplyExecution";
 import { BreakAllianceExecution } from "./alliance/BreakAllianceExecution";
-import { TargetPlayerExecution } from "./TargetPlayerExecution";
-import { EmojiExecution } from "./EmojiExecution";
-import { DonateExecution } from "./DonateExecution";
-import { SetTargetTroopRatioExecution } from "./SetTargetTroopRatioExecution";
+import { AttackExecution } from "./AttackExecution";
+import { BotSpawner } from "./BotSpawner";
 import { ConstructionExecution } from "./ConstructionExecution";
-import { fixProfaneUsername, isProfaneUsername } from "../validations/username";
-import { NoOpExecution } from "./NoOpExecution";
+import { DonateGoldExecution } from "./DonateGoldExecution";
+import { DonateTroopsExecution } from "./DonateTroopExecution";
 import { EmbargoExecution } from "./EmbargoExecution";
-import { RetreatExecution } from "./RetreatExecution";
+import { EmojiExecution } from "./EmojiExecution";
+import { FakeHumanExecution } from "./FakeHumanExecution";
 import { BoatRetreatExecution } from "./BoatRetreatExecution";
 import { MoveWarshipExecution } from "./MoveWarshipExecution";
+import { NoOpExecution } from "./NoOpExecution";
+import { QuickChatExecution } from "./QuickChatExecution";
+import { RetreatExecution } from "./RetreatExecution";
+import { SetTargetTroopRatioExecution } from "./SetTargetTroopRatioExecution";
+import { SpawnExecution } from "./SpawnExecution";
+import { TargetPlayerExecution } from "./TargetPlayerExecution";
+import { TransportShipExecution } from "./TransportShipExecution";
 
 export class Executor {
   // private random = new PseudoRandom(999)
@@ -57,92 +41,83 @@ export class Executor {
   }
 
   createExec(intent: Intent): Execution {
-    let player: Player;
-    if (intent.type != "spawn") {
-      if (!this.mg.hasPlayer(intent.playerID)) {
-        console.warn(
-          `player ${intent.playerID} not found on intent ${intent.type}`,
-        );
-        return new NoOpExecution();
-      }
-      player = this.mg.player(intent.playerID);
-      if (player.clientID() != intent.clientID) {
-        console.warn(
-          `intent ${intent.type} has incorrect clientID ${intent.clientID} for player ${player.name()} with clientID ${player.clientID()}`,
-        );
-        return new NoOpExecution();
-      }
+    const player = this.mg.playerByClientID(intent.clientID);
+    if (!player) {
+      console.warn(`player with clientID ${intent.clientID} not found`);
+      return new NoOpExecution();
     }
+    const playerID = player.id();
 
     switch (intent.type) {
       case "attack": {
         return new AttackExecution(
           intent.troops,
-          intent.playerID,
+          playerID,
           intent.targetID,
           null,
         );
       }
       case "cancel_attack":
-        return new RetreatExecution(intent.playerID, intent.attackID);
+        return new RetreatExecution(playerID, intent.attackID);
       case "cancel_boat":
         return new BoatRetreatExecution(intent.playerID, intent.unitID);
       case "move_warship":
         return new MoveWarshipExecution(intent.unitId, intent.tile);
       case "spawn":
         return new SpawnExecution(
-          new PlayerInfo(
-            intent.flag,
-            // Players see their original name, others see a sanitized version
-            intent.clientID == this.clientID
-              ? sanitize(intent.name)
-              : fixProfaneUsername(sanitize(intent.name)),
-            intent.playerType,
-            intent.clientID,
-            intent.playerID,
-          ),
+          player.info(),
           this.mg.ref(intent.x, intent.y),
         );
       case "boat":
+        let src = null;
+        if (intent.srcX != null || intent.srcY != null) {
+          src = this.mg.ref(intent.srcX, intent.srcY);
+        }
         return new TransportShipExecution(
-          intent.playerID,
+          playerID,
           intent.targetID,
-          this.mg.ref(intent.x, intent.y),
+          this.mg.ref(intent.dstX, intent.dstY),
           intent.troops,
+          src,
         );
       case "allianceRequest":
-        return new AllianceRequestExecution(intent.playerID, intent.recipient);
+        return new AllianceRequestExecution(playerID, intent.recipient);
       case "allianceRequestReply":
         return new AllianceRequestReplyExecution(
           intent.requestor,
-          intent.playerID,
+          playerID,
           intent.accept,
         );
       case "breakAlliance":
-        return new BreakAllianceExecution(intent.playerID, intent.recipient);
+        return new BreakAllianceExecution(playerID, intent.recipient);
       case "targetPlayer":
-        return new TargetPlayerExecution(intent.playerID, intent.target);
+        return new TargetPlayerExecution(playerID, intent.target);
       case "emoji":
-        return new EmojiExecution(
-          intent.playerID,
-          intent.recipient,
-          intent.emoji,
-        );
-      case "donate":
-        return new DonateExecution(
-          intent.playerID,
+        return new EmojiExecution(playerID, intent.recipient, intent.emoji);
+      case "donate_troops":
+        return new DonateTroopsExecution(
+          playerID,
           intent.recipient,
           intent.troops,
         );
+      case "donate_gold":
+        return new DonateGoldExecution(playerID, intent.recipient, intent.gold);
       case "troop_ratio":
-        return new SetTargetTroopRatioExecution(intent.playerID, intent.ratio);
+        return new SetTargetTroopRatioExecution(playerID, intent.ratio);
       case "embargo":
         return new EmbargoExecution(player, intent.targetID, intent.action);
       case "build_unit":
         return new ConstructionExecution(
-          intent.playerID,
+          playerID,
           this.mg.ref(intent.x, intent.y),
           intent.unit,
+        );
+      case "quick_chat":
+        return new QuickChatExecution(
+          playerID,
+          intent.recipient,
+          intent.quickChatKey,
+          intent.variables ?? {},
         );
       default:
         throw new Error(`intent type ${intent} not found`);
@@ -150,27 +125,13 @@ export class Executor {
   }
 
   spawnBots(numBots: number): Execution[] {
-    return new BotSpawner(this.mg, this.gameID)
-      .spawnBots(numBots)
-      .map((i) => this.createExec(i));
+    return new BotSpawner(this.mg, this.gameID).spawnBots(numBots);
   }
 
   fakeHumanExecutions(): Execution[] {
     const execs = [];
     for (const nation of this.mg.nations()) {
-      execs.push(
-        new FakeHumanExecution(
-          this.gameID,
-          new PlayerInfo(
-            nation.flag || "",
-            nation.name,
-            PlayerType.FakeHuman,
-            null,
-            this.random.nextID(),
-            nation,
-          ),
-        ),
-      );
+      execs.push(new FakeHumanExecution(this.gameID, nation));
     }
     return execs;
   }

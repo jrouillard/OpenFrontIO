@@ -1,32 +1,36 @@
 import { LitElement, html } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement, state } from "lit/decorators.js";
+import allianceIcon from "../../../../resources/images/AllianceIconWhite.svg";
+import chatIcon from "../../../../resources/images/ChatIconWhite.svg";
+import donateGoldIcon from "../../../../resources/images/DonateGoldIconWhite.svg";
+import donateTroopIcon from "../../../../resources/images/DonateTroopIconWhite.svg";
+import emojiIcon from "../../../../resources/images/EmojiIconWhite.svg";
+import targetIcon from "../../../../resources/images/TargetIconWhite.svg";
+import traitorIcon from "../../../../resources/images/TraitorIconWhite.svg";
 import { EventBus } from "../../../core/EventBus";
-import { GameView, PlayerView } from "../../../core/game/GameView";
-import { Layer } from "./Layer";
-import { MouseUpEvent } from "../../InputHandler";
 import {
   AllPlayers,
-  Player,
   PlayerActions,
   PlayerID,
   UnitType,
 } from "../../../core/game/Game";
 import { TileRef } from "../../../core/game/GameMap";
-import { renderNumber, renderTroops } from "../../Utils";
-import targetIcon from "../../../../resources/images/TargetIconWhite.svg";
-import emojiIcon from "../../../../resources/images/EmojiIconWhite.svg";
-import donateIcon from "../../../../resources/images/DonateIconWhite.svg";
-import traitorIcon from "../../../../resources/images/TraitorIconWhite.svg";
-import allianceIcon from "../../../../resources/images/AllianceIconWhite.svg";
+import { GameView, PlayerView } from "../../../core/game/GameView";
+import { flattenedEmojiTable } from "../../../core/Util";
+import { MouseUpEvent } from "../../InputHandler";
 import {
   SendAllianceRequestIntentEvent,
   SendBreakAllianceIntentEvent,
-  SendDonateIntentEvent,
+  SendDonateGoldIntentEvent,
+  SendDonateTroopsIntentEvent,
+  SendEmbargoIntentEvent,
   SendEmojiIntentEvent,
   SendTargetPlayerIntentEvent,
-  SendEmbargoIntentEvent,
 } from "../../Transport";
+import { renderNumber, renderTroops } from "../../Utils";
+import { ChatModal } from "./ChatModal";
 import { EmojiTable } from "./EmojiTable";
+import { Layer } from "./Layer";
 
 @customElement("player-panel")
 export class PlayerPanel extends LitElement implements Layer {
@@ -77,9 +81,23 @@ export class PlayerPanel extends LitElement implements Layer {
     this.hide();
   }
 
-  private handleDonateClick(e: Event, myPlayer: PlayerView, other: PlayerView) {
+  private handleDonateTroopClick(
+    e: Event,
+    myPlayer: PlayerView,
+    other: PlayerView,
+  ) {
     e.stopPropagation();
-    this.eventBus.emit(new SendDonateIntentEvent(myPlayer, other, null));
+    this.eventBus.emit(new SendDonateTroopsIntentEvent(myPlayer, other, null));
+    this.hide();
+  }
+
+  private handleDonateGoldClick(
+    e: Event,
+    myPlayer: PlayerView,
+    other: PlayerView,
+  ) {
+    e.stopPropagation();
+    this.eventBus.emit(new SendDonateGoldIntentEvent(myPlayer, other, null));
     this.hide();
   }
 
@@ -107,13 +125,25 @@ export class PlayerPanel extends LitElement implements Layer {
     e.stopPropagation();
     this.emojiTable.showTable((emoji: string) => {
       if (myPlayer == other) {
-        this.eventBus.emit(new SendEmojiIntentEvent(AllPlayers, emoji));
+        this.eventBus.emit(
+          new SendEmojiIntentEvent(
+            AllPlayers,
+            flattenedEmojiTable.indexOf(emoji),
+          ),
+        );
       } else {
-        this.eventBus.emit(new SendEmojiIntentEvent(other, emoji));
+        this.eventBus.emit(
+          new SendEmojiIntentEvent(other, flattenedEmojiTable.indexOf(emoji)),
+        );
       }
       this.emojiTable.hideTable();
       this.hide();
     });
+  }
+
+  private handleChat(e: Event, sender: PlayerView, other: PlayerView) {
+    this.ctModal.open(sender, other);
+    this.hide();
   }
 
   private handleTargetClick(e: Event, other: PlayerView) {
@@ -126,12 +156,22 @@ export class PlayerPanel extends LitElement implements Layer {
     return this;
   }
 
+  private ctModal;
+
   init() {
     this.eventBus.on(MouseUpEvent, (e: MouseEvent) => this.hide());
+
+    this.ctModal = document.querySelector("chat-modal") as ChatModal;
   }
 
-  tick() {
-    this.requestUpdate();
+  async tick() {
+    if (this.isVisible && this.tile) {
+      const myPlayer = this.g.myPlayer();
+      if (myPlayer !== null && myPlayer.isAlive()) {
+        this.actions = await myPlayer.actions(this.tile);
+        this.requestUpdate();
+      }
+    }
   }
 
   getTotalNukesSent(otherId: PlayerID): number {
@@ -163,7 +203,9 @@ export class PlayerPanel extends LitElement implements Layer {
 
     let other = this.g.owner(this.tile);
     if (!other.isPlayer()) {
-      throw new Error("Tile is not owned by a player");
+      this.hide();
+      console.warn("Tile is not owned by a player");
+      return;
     }
     other = other as PlayerView;
 
@@ -264,6 +306,14 @@ export class PlayerPanel extends LitElement implements Layer {
 
             <!-- Action buttons -->
             <div class="flex justify-center gap-2">
+              <button
+                @click=${(e) => this.handleChat(e, myPlayer, other)}
+                class="w-10 h-10 flex items-center justify-center
+                           bg-opacity-50 bg-gray-700 hover:bg-opacity-70
+                           text-white rounded-lg transition-colors"
+              >
+                <img src=${chatIcon} alt="Target" class="w-6 h-6" />
+              </button>
               ${canTarget
                 ? html`<button
                     @click=${(e) => this.handleTargetClick(e, other)}
@@ -302,12 +352,24 @@ export class PlayerPanel extends LitElement implements Layer {
                 : ""}
               ${canDonate
                 ? html`<button
-                    @click=${(e) => this.handleDonateClick(e, myPlayer, other)}
+                    @click=${(e) =>
+                      this.handleDonateTroopClick(e, myPlayer, other)}
                     class="w-10 h-10 flex items-center justify-center
                            bg-opacity-50 bg-gray-700 hover:bg-opacity-70
                            text-white rounded-lg transition-colors"
                   >
-                    <img src=${donateIcon} alt="Donate" class="w-6 h-6" />
+                    <img src=${donateTroopIcon} alt="Donate" class="w-6 h-6" />
+                  </button>`
+                : ""}
+              ${canDonate
+                ? html`<button
+                    @click=${(e) =>
+                      this.handleDonateGoldClick(e, myPlayer, other)}
+                    class="w-10 h-10 flex items-center justify-center
+                          bg-opacity-50 bg-gray-700 hover:bg-opacity-70
+                          text-white rounded-lg transition-colors"
+                  >
+                    <img src=${donateGoldIcon} alt="Donate" class="w-6 h-6" />
                   </button>`
                 : ""}
               ${canSendEmoji

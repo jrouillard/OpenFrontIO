@@ -1,23 +1,20 @@
-import { LitElement, css, html } from "lit";
+import { LitElement, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { Layer } from "./Layer";
+import { EventBus } from "../../../core/EventBus";
 import {
-  Game,
-  GameType,
-  Player,
   PlayerProfile,
   PlayerType,
   Relation,
   Unit,
   UnitType,
 } from "../../../core/game/Game";
-import { ClientID } from "../../../core/Schemas";
-import { EventBus } from "../../../core/EventBus";
-import { TransformHandler } from "../TransformHandler";
-import { MouseMoveEvent } from "../../InputHandler";
-import { GameView, PlayerView, UnitView } from "../../../core/game/GameView";
 import { TileRef } from "../../../core/game/GameMap";
+import { GameView, PlayerView, UnitView } from "../../../core/game/GameView";
+import { ClientID } from "../../../core/Schemas";
+import { MouseMoveEvent } from "../../InputHandler";
 import { renderNumber, renderTroops } from "../../Utils";
+import { TransformHandler } from "../TransformHandler";
+import { Layer } from "./Layer";
 
 function euclideanDistWorld(
   coord: { x: number; y: number },
@@ -210,6 +207,9 @@ export class PlayerInfoOverlay extends LitElement implements Layer {
             : ""}
           ${player.name()}
         </div>
+        ${player.team() != null
+          ? html`<div class="text-sm opacity-80">Team: ${player.team()}</div>`
+          : ""}
         <div class="text-sm opacity-80">Type: ${playerType}</div>
         ${player.troops() >= 1
           ? html`<div class="text-sm opacity-80" translate="no">
