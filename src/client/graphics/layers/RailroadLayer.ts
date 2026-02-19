@@ -1,4 +1,4 @@
-import { colord } from "colord";
+import { Colord, colord } from "colord";
 import { EventBus, GameEvent } from "../../../core/EventBus";
 import { PlayerID, UnitType } from "../../../core/game/Game";
 import { TileRef } from "../../../core/game/GameMap";
@@ -257,7 +257,7 @@ export class RailroadLayer implements Layer {
 
     const offsetX = -this.game.width() / 2;
     const offsetY = -this.game.height() / 2;
-    context.fillStyle = "rgba(0, 0, 0, 0.4)";
+    context.fillStyle = "rgba(255, 255, 255, 0.4)";
 
     for (const path of this.uiState.ghostRailPaths) {
       const railTiles = computeRailTiles(this.game, path);
@@ -439,10 +439,14 @@ export class RailroadLayer implements Layer {
     }
     const owner = this.game.owner(tile);
     const recipient = owner.isPlayer() ? owner : null;
-    let color = recipient
-      ? recipient.borderColor()
-      : colord("rgba(255,255,255,1)");
-
+    let color: Colord;
+    if (!recipient) {
+      color = colord("rgba(255,255,255,1)");
+    } else if (this.game.myPlayer()?.id() === recipient.id()) {
+      color = recipient.territoryColor().darken(0.125);
+    } else {
+      color = recipient.borderColor();
+    }
     if (this.alternativeView && recipient?.isMe()) {
       color = colord("#00ff00");
     }
